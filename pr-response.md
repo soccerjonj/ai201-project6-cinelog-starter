@@ -19,9 +19,9 @@ Some of the prose in my Comment 4 and 5 entries and my PR description was AI-dra
 
 ## Comment 1 — Rename
 **What I did:**
-I renamed the function save_to_watchlist() to add_to_watchlist() in the function definition and call sites.
+I renamed the function save_to_watchlist() to add_to_watchlist() at its definition in `services/watchlist_service.py`, and updated the one call site — the import and the call in `routes/watchlist/watchlist.py`.
 **How I verified:**
-Grepped the whole project for the old name and none remain; app imports cleanly; pytest passes 4/4.
+I ran a project-wide grep for the old name `save_to_watchlist` (and for a doubled-name typo) across all `.py` files to confirm no references were missed — none remain. The only call site that needed updating was in `routes/watchlist/watchlist.py`. I also confirmed the app imports cleanly and `pytest` passes.
 
 ## Comment 2 — Deduplication
 **What I did:**
@@ -30,9 +30,9 @@ I added deduplication to `add_to_watchlist()` in `services/watchlist_service.py`
 Note that the existing test suite does NOT cover the duplicate path (the test I wrote for Comment 3 exercises a *nonexistent* film, not a *duplicate* one), so simply running pytest does not verify this logic. I verified it directly instead: added the same film to a user's watchlist twice. The first call succeeded, the second raised `AlreadyInWatchlistError`, and a `WatchlistEntry.query.filter_by(...).count()` confirmed exactly one row existed in the database — no duplicate was created.
 ## Comment 3 — Missing test
 **What I did:**
-I created a new file tests/test_watchlist.py. Writing the equivalent test of test_add_to_collection_nonexistent_film_raises but now as test_add_to_watchlist_nonexistent_film_raises following the same fixture and assertion structure.
+I created a new file tests/test_watchlist.py containing `test_add_to_watchlist_nonexistent_film_raises`, which checks that calling `add_to_watchlist()` with a `film_id` that doesn't exist in the database raises `FilmNotFoundError` (rather than a database integrity error or silently creating an entry). I modeled it on the existing `test_add_to_collection_nonexistent_film_raises` in tests/test_collection.py, reusing the same `app`/`sample_user` fixtures and the `pytest.raises(...)` assertion structure.
 **How I verified:**
-I ran the new pytest as well as the whole pytest suite to verify it worked.
+I ran the new test on its own (`pytest tests/test_watchlist.py`) and then the whole suite (`pytest tests/`) — all pass, confirming the new test both passes and doesn't break the existing collection tests.
 ## Comment 4 — Default visibility
 **My position:**
 The default should remain public=True
