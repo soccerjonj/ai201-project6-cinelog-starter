@@ -1,7 +1,21 @@
 # PR Response Doc — CineLog Watchlist Feature
 
 ## AI Usage
-<!-- Fill in at the end — how you used AI tools during this project -->
+I used AI (Claude) as an assistant throughout this project in several specific ways:
+
+1. **Codebase orientation.** Before reading the review comments, I had AI summarize `models.py`, `services/collection_service.py`, and `tests/test_collection.py`, and map how the watchlist code compared to the collection code. I verified each summary against the actual source rather than taking it at face value.
+
+2. **Verifying the deduplication logic (Comment 2).** I wrote the dedup check myself. I then used AI to help run a quick check that added the same film twice and confirmed the second call raised `AlreadyInWatchlistError` with only one row remaining in the database — AI was used to verify behavior, not to write the logic.
+
+3. **Debugging the rebase (Comment 6).** After my rebase reported "success," AI helped me discover it had silently deleted the `WatchlistEntry` model (the test suite failed with an `ImportError`). It explained why git didn't flag a textual conflict, and helped me recover the pre-rebase state from the reflog and re-add the model with a UUID `film_id`.
+
+4. **Commit history and git guidance.** I used AI to check my commit messages against conventional-commit format, to identify which commit needed rewording, and to walk through the interactive rebase step by step.
+
+5. **Drafting and stress-testing the design arguments (Comments 4 and 5).** I formed my own positions first: keep `public=True` because CineLog is a community app, and agree with the maintainer's date-added preference for sort order. I then used AI to sharpen the writing and surface angles I hadn't fully articulated:
+   - For **Comment 4**, my core argument was the community-app case for public-by-default. AI helped me name the tradeoff explicitly — the "privacy surprise" of public-by-default and the privacy-by-default counter-principle — and the mitigation (the per-entry `public` flag). My final response builds on that by taking a clear position *and* acknowledging the opposing option, rather than only arguing one side.
+   - For **Comment 5**, my position (date-added helps users find recent additions) was my own. AI surfaced the additional point that date-added would make the watchlist consistent with `get_collection()`, which strengthened my engagement with the maintainer's reasoning. I decided to keep the code alphabetical and document date-added as a recommended follow-up.
+
+Some of the prose in my Comment 4 and 5 entries and my PR description was AI-drafted and then reviewed and adjusted by me. The positions, decisions, and final judgments are my own.
 
 ## Comment 1 — Rename
 **What I did:**
@@ -49,5 +63,72 @@ I re-added the `WatchlistEntry` model to `models.py`, updated for the UUID schem
 - `pytest tests/` passes 5/5 — including the watchlist tests that had failed with `ImportError` right after the rebase.
 - `git log --merges origin/main..HEAD` is empty, confirming a linear history with no merge commits.
 
+## Commit History
+![git log --oneline showing 10 conventional commits, no merge commits](commit-history.png)
+
 ## PR Description
-<!-- Written at the end — feature overview, design decisions, manual testing steps -->
+
+### What it does
+Adds a watchlist so users can save films they want to watch later — separate
+from the collection, which tracks films already watched. Introduces a
+`WatchlistEntry` model and two REST endpoints:
+
+- `POST /watchlist/<user_id>/add` — add a film to the user's watchlist.
+  Body: `{ "film_id": "<uuid>" }`. Returns `201` with the created entry.
+- `GET /watchlist/<user_id>` — return all films on the user's watchlist.
+
+Duplicate adds are rejected (a film can appear on a watchlist only once), and
+adding a film that doesn't exist raises a not-found error.
+
+### Design decisions
+1. **Default visibility — public (`public=True`).** New watchlist entries are
+   public by default. CineLog is described as a community film-tracking app, so
+   I optimized for discovery and social engagement: private-by-default would
+   leave the community features empty since most users never change defaults.
+   Tradeoff: public-by-default risks a privacy surprise for users who expect
+   "save for later" to be private. Mitigated by the per-entry `public` flag, so
+   users can still make an entry private, and the default can be revisited.
+
+2. **Sort order — alphabetical, with date-added documented as a follow-up.**
+   `get_watchlist()` currently returns entries alphabetically by title. I agree
+   with the maintainer's preference for date-added (newest first) — most users
+   want to see what they recently added, and it would make the watchlist
+   consistent with `get_collection()`, which already orders by date added. I've
+   documented date-added as a recommended follow-up: a one-line change in
+   `get_watchlist()` from `.order_by(Film.title.asc())` to
+   `.order_by(WatchlistEntry.date_added.desc())`.
+
+### How to manually test
+1. Install deps and start the app:
+   ```
+   pip install -r requirements.txt
+   python app.py            # runs on http://localhost:5000
+   ```
+2. Seed a user and a film, and capture their UUIDs (the DB starts empty):
+   ```
+   python -c "
+   from app import create_app, db
+   from models import User, Film
+   app = create_app()
+   with app.app_context():
+       u = User(username='alice', email='alice@example.com')
+       f = Film(title='Dune', year=2021, genre='Sci-Fi')
+       db.session.add_all([u, f]); db.session.commit()
+       print('USER_ID:', u.id); print('FILM_ID:', f.id)
+   "
+   ```
+3. Add the film to the watchlist (expect `201`):
+   ```
+   curl -X POST http://localhost:5000/watchlist/<USER_ID>/add \
+     -H "Content-Type: application/json" -d '{"film_id": "<FILM_ID>"}'
+   ```
+4. View the watchlist (expect the film in the list):
+   ```
+   curl http://localhost:5000/watchlist/<USER_ID>
+   ```
+5. Add the same film again — no duplicate entry is created (the service raises
+   `AlreadyInWatchlistError`; the watchlist stays at one entry).
+6. Run the test suite:
+   ```
+   pytest tests/
+   ```
