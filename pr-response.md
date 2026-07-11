@@ -37,8 +37,17 @@ I agree with the reviewer's preference for "date added" order, and with their re
 
 ## Comment 6 — Rebase
 **What conflicted:**
+Interestingly, git reported *no* textual conflict — the rebase completed "successfully" both times I ran it, but it silently deleted my `WatchlistEntry` model. The cause: main's UUID refactor commit had *removed* `WatchlistEntry` from `models.py`, and my branch commits never re-edited those exact lines (my changes were in the service, route, and test files). Git's 3-way merge saw "one side deleted these lines, the other side didn't touch them" and applied the deletion without asking. I only caught it because running the test suite after the rebase failed with `ImportError: cannot import name 'WatchlistEntry'`. The real conflict was semantic, not textual: my watchlist code was written against integer film IDs, while main had migrated `Film.id` (and all foreign keys) to UUID strings.
+
 **How I resolved it:**
+I re-added the `WatchlistEntry` model to `models.py`, updated for the UUID schema: `film_id` changed from `db.Integer` to `db.String(36)` with the same `ForeignKey("film.id")`, matching how `CollectionEntry.film_id` was migrated on main. I also updated the docstring in `add_to_watchlist()` that still described `film_id` as an integer ("pre-refactor"). I committed this as its own commit on top of the rebased branch.
+
 **How I verified no conflict remains:**
+- `grep` for `Integer`/`pre-refactor` in the watchlist service and routes returns nothing — no integer ID references remain.
+- All four models (`User`, `Film`, `CollectionEntry`, `WatchlistEntry`) are present in `models.py`, all with `String(36)` UUID keys.
+- The app imports and starts cleanly.
+- `pytest tests/` passes 5/5 — including the watchlist tests that had failed with `ImportError` right after the rebase.
+- `git log --merges origin/main..HEAD` is empty, confirming a linear history with no merge commits.
 
 ## PR Description
 <!-- Written at the end — feature overview, design decisions, manual testing steps -->
